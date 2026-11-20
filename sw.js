@@ -1,7 +1,7 @@
 /* Futsal app: keeps a copy of the app so it opens instantly and works on poor signal.
    App files are fetched fresh when online (so updates arrive straight away) and the
    saved copy is used when offline. Squad data from Supabase is never cached here. */
-var CACHE = 'futsal-v8';
+var CACHE = 'futsal-v9';
 var SHELL = ['./', './index.html', './admin.html', './style.css', './app.js', './config.js', './manifest.webmanifest', './manifest-coach.webmanifest', './icon-192.png', './icon-512.png', './icon-180.png', './logo.jpg'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
