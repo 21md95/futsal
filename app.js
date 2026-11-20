@@ -82,7 +82,7 @@ function first(n) { return String(n || '').split(' ')[0]; }
 function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
 function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function plural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
-function cfg() { var c = S.config || {}; return { skills: (c.skills && c.skills.length) ? c.skills : DEFAULT_SKILLS, fresh: +c.fresh || 7, overdue: +c.overdue || 14, sessionMins: +c.sessionMins || 90, teamToken: c.teamToken || null, seasonEnd: c.seasonEnd || '2027-06-30', openAccess: c.openAccess !== false }; }
+function cfg() { var c = S.config || {}; return { skills: (c.skills && c.skills.length) ? c.skills : DEFAULT_SKILLS, fresh: +c.fresh || 7, overdue: +c.overdue || 14, sessionMins: +c.sessionMins || 90, teamToken: c.teamToken || null, seasonEnd: c.seasonEnd || '2027-06-30', openAccess: c.openAccess !== false, positions: (c.positions && c.positions.length) ? c.positions : POSITIONS }; }
 function isCoach() { return MODE === 'admin'; }
 function haptic() { try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {} }
 function players() { return Object.keys(S.players).map(function (id) { var p = S.players[id]; return { id: id, name: p.name || 'Unnamed', pos: p.pos || '' }; }).sort(function (a, b) { return a.name.localeCompare(b.name); }); }
@@ -183,7 +183,7 @@ function ingest(b) {
   S.days = {}; (b.days || []).forEach(function (a) { (S.days[a.player_id] = S.days[a.player_id] || {})[String(a.day).slice(0, 10)] = a.status; });
   S.drills = {}; (b.drills || []).forEach(function (d) { S.drills[d.id] = { name: d.name, mins: d.mins, kind: d.kind, skills: d.skills || [], setup: d.setup || '', cue: d.cue || '', link: d.link || '', own: !!d.own }; });
   var st = b.settings;
-  S.config = st ? { skills: st.skills, fresh: st.fresh, overdue: st.overdue, sessionMins: st.session_mins, teamToken: st.team_token || null, seasonEnd: st.season_end ? String(st.season_end).slice(0, 10) : null, openAccess: st.open_access !== false } : null;
+  S.config = st ? { skills: st.skills, fresh: st.fresh, overdue: st.overdue, sessionMins: st.session_mins, teamToken: st.team_token || null, seasonEnd: st.season_end ? String(st.season_end).slice(0, 10) : null, openAccess: st.open_access !== false, positions: st.positions || null } : null;
 }
 async function reload() {
   if (MODE === 'admin') {
@@ -515,7 +515,7 @@ function viewDrills(stats) {
     }).join('') + '</div>', '', 'The squad most needs ' + esc(top.join(' and ')) + (t ? '. Add puts a drill into the ' + esc(fmtD(t.date)) + ' plan.' : '.'));
   }
   var a = '<div class="search">' + ic('search', 17, 2.2) + '<input type="search" placeholder="Search drills" data-input="libQ" value="' + esc(S.libQ) + '" aria-label="Search drills"></div>';
-  a += '<div class="scroller" role="group" aria-label="Filter by skill">' + ['all'].concat(cfg().skills).map(function (k) { return '<button type="button" class="chip" data-a="drillFilter" data-v="' + esc(k) + '" aria-pressed="' + (S.drillFilter === k) + '">' + (k === 'all' ? 'All' : esc(k)) + '</button>'; }).join('') + '</div>';
+  a += '<div class="row between" style="margin-bottom:-14px"><span class="fn" style="padding-left:4px">Filter by skill</span><button class="btn plain" data-a="sheet" data-t="skills">Edit skills</button></div><div class="scroller" role="group" aria-label="Filter by skill">' + ['all'].concat(cfg().skills).map(function (k) { return '<button type="button" class="chip" data-a="drillFilter" data-v="' + esc(k) + '" aria-pressed="' + (S.drillFilter === k) + '">' + (k === 'all' ? 'All' : esc(k)) + '</button>'; }).join('') + '</div>';
   var list = all.filter(function (d) { return S.drillFilter === 'all' || (d.skills || []).indexOf(S.drillFilter) >= 0; });
   var any = false;
   [['own', 'Your drills'], ['warmup', 'Warm-ups'], ['drill', 'Drills'], ['game', 'Games']].forEach(function (k) {
@@ -528,32 +528,65 @@ function viewDrills(stats) {
 }
 
 /* ---------- stats ---------- */
+var RING = { att: '#FA114F', skill: '#A6FF00', streak: '#00D8FF' };
+function ring(pct, color, size, sw, inner) {
+  var r = (size - sw) / 2; var c = 2 * Math.PI * r; var p = Math.max(0, Math.min(1, pct || 0));
+  return '<svg class="ring" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" aria-hidden="true"><circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-opacity=".2" stroke-width="' + sw + '"/>' +
+    (p > 0 ? '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="' + sw + '" stroke-linecap="round" stroke-dasharray="' + (c * p).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(-90 ' + size / 2 + ' ' + size / 2 + ')"/>' : '') + (inner || '') + '</svg>';
+}
+function rings3(vals, size) {
+  var sw = Math.round(size * 0.12), gap = 2, h = '<svg class="ring" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" aria-hidden="true">';
+  vals.forEach(function (v, i) {
+    var r = size / 2 - sw / 2 - i * (sw + gap); var c = 2 * Math.PI * r; var p = Math.max(0, Math.min(1, v.pct || 0));
+    h += '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + v.color + '" stroke-opacity=".2" stroke-width="' + sw + '"/>';
+    if (p > 0) h += '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + v.color + '" stroke-width="' + sw + '" stroke-linecap="round" stroke-dasharray="' + (c * p).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(-90 ' + size / 2 + ' ' + size / 2 + ')"/>';
+  });
+  return h + '</svg>';
+}
+function playerFitness(pid, stats) {
+  var c = cfg(); var full = c.overdue + 7;
+  var doneT = eventsArr().filter(function (s) { return s.done && s.kind !== 'match'; }).sort(byTime);
+  var came = function (s) { return (s.attended || []).indexOf(pid) >= 0; };
+  var trained = doneT.filter(came);
+  var last12 = doneT.slice(-12);
+  var streak = 0; for (var i = doneT.length - 1; i >= 0 && came(doneT[i]); i--) streak++;
+  var best = 0, run = 0; doneT.forEach(function (s) { run = came(s) ? run + 1 : 0; if (run > best) best = run; });
+  var skills = c.skills.map(function (k) { var st = skillState(pid, k, stats); return { k: k, st: st, pct: st.days == null ? 0 : Math.max(0, 1 - st.days / full) }; });
+  var fresh = skills.length ? skills.reduce(function (a, x) { return a + x.pct; }, 0) / skills.length : 0;
+  var played = eventsArr().filter(function (s) { return s.done && s.kind === 'match' && (s.attended || []).indexOf(pid) >= 0; }).length;
+  return { doneT: doneT, trained: trained, last12: last12, came: came, streak: streak, best: best, skills: skills, fresh: fresh, played: played,
+    attPct: last12.length ? last12.filter(came).length / last12.length : 0, full: full };
+}
 function viewStats(stats) {
   var ps = players();
   if (!isCoach() && !S.me) return viewWho();
   if (!ps.length) return hdr('Player stats') + emptyBox('No players yet.');
   var pid = S.statPid && S.players[S.statPid] ? S.statPid : (S.me && S.players[S.me] ? S.me : ps[0].id); var p = S.players[pid];
-  var doneT = eventsArr().filter(function (s) { return s.done && s.kind !== 'match'; }).sort(byTime);
-  var trained = doneT.filter(function (s) { return (s.attended || []).indexOf(pid) >= 0; });
-  var played = eventsArr().filter(function (s) { return s.done && s.kind === 'match' && (s.attended || []).indexOf(pid) >= 0; }).length;
-  var rate = doneT.length ? Math.round(trained.length / doneT.length * 100) + '%' : '\u2013';
+  var F = playerFitness(pid, stats); var c = cfg();
   var h = isCoach() ? '<a class="back" href="#players">' + ic('chevL', 22, 2.4) + 'Squad</a>' : '';
   h += '<header class="hdr" style="align-items:center"><div class="row g12 grow"><span class="av lg' + (isCoach() ? '' : ' me') + '" aria-hidden="true">' + esc(initials(p.name)) + '</span><div class="col g4"><h1 class="lt">' + esc(p.name) + '</h1><span class="t2">' + esc(p.pos || 'Player') + '</span></div></div>' +
     (isCoach() ? '<button class="btn sm tint" data-a="sheet" data-t="editPlayer" data-pid="' + esc(pid) + '">Edit</button>' : '<button class="btn sm" data-a="notmeAsk">Switch</button>') + '</header>';
-  var a = '<div class="tiles"><div class="tile"><b>' + trained.length + '</b><span>Sessions</span></div><div class="tile"><b>' + rate + '</b><span>Attendance</span></div><div class="tile"><b>' + played + '</b><span>Matches</span></div></div>';
-  var last12 = doneT.slice(-12);
-  var strip = '<div class="att" role="img" aria-label="Attendance at the last ' + last12.length + ' sessions">';
-  for (var i = 0; i < 12 - last12.length; i++) strip += '<i class="e"></i>';
-  last12.forEach(function (s) { var y = (s.attended || []).indexOf(pid) >= 0; strip += '<i class="' + (y ? 'y' : '') + '" title="' + esc(fmtD(s.date) + (y ? ': came' : ': missed')) + '"></i>'; });
-  a += sec('Last 12 sessions', '<div class="group"><div class="cell stack">' + strip + '</div></div>', '<span class="fn">' + (last12.length ? 'Came to ' + last12.filter(function (s) { return (s.attended || []).indexOf(pid) >= 0; }).length + ' of ' + last12.length : 'None logged yet') + '</span>');
-  var c = cfg(); var full = c.overdue + 7;
-  var rows = c.skills.map(function (k) { return { k: k, st: skillState(pid, k, stats) }; }).sort(function (x, y) { return (y.st.days == null ? 999 : y.st.days) - (x.st.days == null ? 999 : x.st.days); });
-  var b = sec('Skills', '<div class="group">' + rows.map(function (r) {
-    var pct = r.st.days == null ? 100 : Math.min(100, Math.round(r.st.days / full * 100));
-    return '<div class="skill"><div class="row between"><span class="t1">' + esc(r.k) + '</span><span class="row g8"><span class="fn" style="color:' + C[r.st.level] + ';font-weight:600">' + LEVEL_LABEL[r.st.level] + '</span><span class="num" style="font-weight:600;min-width:34px;text-align:right">' + (r.st.days == null ? '\u2013' : r.st.days + 'd') + '</span></span></div>' +
-      '<div class="track" role="img" aria-label="' + esc(r.k + ': ' + (r.st.days == null ? 'not trained yet' : r.st.days + ' days since trained') + ', ' + LEVEL_LABEL[r.st.level]) + '"><div class="fl" style="width:' + pct + '%;background:' + C[r.st.level] + '"></div><span class="tk" style="left:' + Math.round(c.fresh / full * 100) + '%"></span><span class="tk" style="left:' + Math.round(c.overdue / full * 100) + '%"></span></div>' +
-      '<span class="fn">' + (r.st.date ? 'Last trained ' + esc(fmtLong(r.st.date)) : 'No session logged with this skill yet') + '</span></div>';
-  }).join('') + '</div>', '<span class="fn">Days since trained</span>', 'The marks on each bar show when a skill becomes due (' + c.fresh + ' days) and overdue (' + c.overdue + ' days).');
+  var attN = F.last12.filter(F.came).length;
+  var act = '<section class="activity"><div class="act-rings" role="img" aria-label="' + esc('Attendance ' + Math.round(F.attPct * 100) + '%, skills ' + Math.round(F.fresh * 100) + '% fresh, streak ' + F.streak + ' of 4') + '">' +
+    rings3([{ pct: F.attPct, color: RING.att }, { pct: F.fresh, color: RING.skill }, { pct: F.streak / 4, color: RING.streak }], 150) + '</div>' +
+    '<div class="act-legend">' +
+    '<div><span class="act-k">Attendance</span><span class="act-v" style="color:' + RING.att + '">' + attN + '<small>/' + (F.last12.length || 0) + ' SESSIONS</small></span></div>' +
+    '<div><span class="act-k">Skills fresh</span><span class="act-v" style="color:' + RING.skill + '">' + Math.round(F.fresh * 100) + '<small>%</small></span></div>' +
+    '<div><span class="act-k">Streak</span><span class="act-v" style="color:' + RING.streak + '">' + F.streak + '<small>/4 IN A ROW</small></span></div>' +
+    '</div></section>';
+  var a = sec('Activity', act, '<span class="fn">Last 12 sessions</span>');
+  a += '<div class="tiles"><div class="tile"><span>Sessions</span><b style="color:' + RING.att + '">' + F.trained.length + '</b></div><div class="tile"><span>Best streak</span><b style="color:' + RING.streak + '">' + F.best + '</b></div><div class="tile"><span>Matches</span><b>' + F.played + '</b></div></div>';
+  var bars = '<div class="cols12">';
+  for (var i = 0; i < 12 - F.last12.length; i++) bars += '<div class="cbar"><i class="e"></i><span></span></div>';
+  F.last12.forEach(function (s) { var y = F.came(s); bars += '<div class="cbar" title="' + esc(fmtD(s.date) + (y ? ': came' : ': missed')) + '"><i class="' + (y ? 'y' : 'n') + '"></i><span>' + parseD(s.date).getDate() + '</span></div>'; });
+  bars += '</div>';
+  a += sec('Training log', '<div class="group"><div class="cell stack">' + bars + '<div class="legend" style="padding:0"><span><i class="dot" style="background:' + RING.att + '"></i>Came</span><span><i class="dot" style="background:var(--card3)"></i>Missed</span></div></div></div>');
+  var sk = F.skills.slice().sort(function (x, y) { return x.pct - y.pct; });
+  var lvlCol = { fresh: RING.skill, due: '#FF9F0A', overdue: '#FF453A', never: '#FF453A' };
+  var b = sec('Skills', '<div class="skillgrid">' + sk.map(function (x) {
+    var col = lvlCol[x.st.level];
+    return '<div class="skcard"><div class="skring">' + ring(x.pct, col, 64, 8) + '<span class="skpct">' + Math.round(x.pct * 100) + '</span></div><div class="col g4" style="min-width:0"><span class="t1" style="font-weight:600">' + esc(x.k) + '</span><span class="fn" style="color:' + col + '">' + LEVEL_LABEL[x.st.level] + '</span><span class="fn">' + (x.st.days == null ? 'Not trained yet' : x.st.days === 0 ? 'Trained today' : x.st.days + ' day' + (x.st.days === 1 ? '' : 's') + ' ago') + '</span></div></div>';
+  }).join('') + '</div>', isCoach() ? '<button class="btn plain" data-a="sheet" data-t="skills">Edit skills</button>' : '', 'Each ring empties as time passes since that skill was last trained. Due after ' + c.fresh + ' days, overdue after ' + c.overdue + '.');
   return h + cols(a, b);
 }
 
@@ -564,7 +597,8 @@ function viewPlayers(stats) {
   if (!ps.length) return h + emptyBox('Add your squad to get started.', '<button class="btn fill" data-a="sheet" data-t="player">Add players</button>');
   return h + sec('', '<div class="group">' + ps.map(function (p) {
     var over = cfg().skills.filter(function (k) { var l = skillState(p.id, k, stats).level; return l === 'overdue' || l === 'never'; }).length;
-    return '<button class="cell ind" data-a="viewPlayer" data-pid="' + esc(p.id) + '"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span class="col grow g4"><span class="t1">' + esc(p.name) + '</span><span class="t2">' + esc(p.pos || 'Player') + (over ? ', ' + over + ' skills overdue' : ', all skills fresh') + '</span></span>' + (e ? pill(rsvp(p.id, e)) : '') + chev() + '</button>';
+    var F = playerFitness(p.id, stats);
+    return '<button class="cell ind" data-a="viewPlayer" data-pid="' + esc(p.id) + '"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span class="col grow g4"><span class="t1">' + esc(p.name) + '</span><span class="t2">' + esc(p.pos || 'Player') + (over ? ', ' + over + ' skills overdue' : ', all skills fresh') + '</span></span>' + (e ? pill(rsvp(p.id, e)) : '') + '<span title="Attendance, last 12 sessions">' + rings3([{ pct: F.attPct, color: RING.att }, { pct: F.fresh, color: RING.skill }], 30) + '</span>' + chev() + '</button>';
   }).join('') + '</div>', '', e ? 'Answers shown are for ' + esc(evTitle(e).toLowerCase() === 'training' ? 'training' : evTitle(e)) + ' on ' + esc(fmtD(e.date)) + '.' : '');
 }
 
@@ -595,6 +629,7 @@ function viewCoach(stats) {
     '<button class="cell" data-a="sheet" data-t="training"><span class="it" style="background:var(--green)">' + ic('training', 17, 2) + '</span><span class="grow">Add training</span>' + chev() + '</button>' +
     '<button class="cell" data-a="sheet" data-t="match"><span class="it" style="background:var(--orange)">' + ic('matches', 17, 2) + '</span><span class="grow">Add match</span>' + chev() + '</button>' +
     '<button class="cell" data-a="sheet" data-t="coaches"><span class="it" style="background:#5E5CE6">' + ic('invite', 17, 2) + '</span><span class="grow">Coaches</span><span class="val">' + (S.admins.length || '') + '</span>' + chev() + '</button>' +
+    '<button class="cell" data-a="sheet" data-t="skills"><span class="it" style="background:#30B0C7">' + ic('drills', 17, 2) + '</span><span class="grow">Skills & positions</span><span class="val">' + cfg().skills.length + '</span>' + chev() + '</button>' +
     '<button class="cell" data-a="sheet" data-t="settings"><span class="it" style="background:#636366">' + ic('gear', 17, 2) + '</span><span class="grow">Settings</span>' + chev() + '</button>' +
     '</div>');
   b += '<div class="group"><button class="cell" data-a="logout"><span class="grow" style="color:var(--red)">Sign out</span><span class="fn">' + esc(S.email) + '</span></button></div>';
@@ -602,7 +637,7 @@ function viewCoach(stats) {
 }
 
 /* ---------- sheets ---------- */
-function posOpts(cur) { return '<option value="">Not set</option>' + POSITIONS.map(function (x) { return '<option' + (x === cur ? ' selected' : '') + '>' + x + '</option>'; }).join(''); }
+function posOpts(cur) { var ps = cfg().positions.slice(); if (cur && ps.indexOf(cur) < 0) ps.push(cur); return '<option value="">Not set</option>' + ps.map(function (x) { return '<option' + (x === cur ? ' selected' : '') + '>' + x + '</option>'; }).join(''); }
 function field(label, input, stack) { return '<label class="field' + (stack ? ' stack' : '') + '"><span>' + label + '</span>' + input + '</label>'; }
 function checkRow(name, value, checked, label, sub) { return '<label class="check"><input class="tick" type="checkbox" name="' + name + '" value="' + esc(value) + '"' + (checked ? ' checked' : '') + '><span class="col g4 grow"><span>' + label + '</span>' + (sub ? '<span class="fn">' + sub + '</span>' : '') + '</span></label>'; }
 function sheetHTML(stats) {
@@ -681,7 +716,7 @@ function sheetHTML(stats) {
   } else if (sh.t === 'drill') {
     var dr = sh.did ? S.drills[sh.did] : null; title = dr ? 'Edit drill' : 'New drill'; dr = dr || { name: '', mins: 15, kind: 'drill', skills: [], setup: '', cue: '', link: '' };
     body = '<form data-form="drill" class="form"' + (sh.did ? ' data-did="' + esc(sh.did) + '"' : '') + (sh.addto ? ' data-addto="' + esc(sh.addto) + '"' : '') + '><div class="fgroup">' + field('Name', '<input type="text" name="name" required maxlength="60" value="' + esc(dr.name) + '" placeholder="For example, 3v2 overload">') + field('Minutes', '<input type="number" name="mins" min="5" max="60" step="5" value="' + esc(dr.mins) + '" inputmode="numeric">') + field('Type', '<select name="kind">' + [['warmup', 'Warm-up'], ['drill', 'Drill'], ['game', 'Game']].map(function (k) { return '<option value="' + k[0] + '"' + ((dr.kind || 'drill') === k[0] ? ' selected' : '') + '>' + k[1] + '</option>'; }).join('') + '</select>') + '</div>' +
-      '<div class="col g8"><span class="flabel">Skills it trains</span><div class="chips" style="padding:0 4px">' + c.skills.map(function (k) { return '<label class="chip"><input type="checkbox" name="skills" value="' + esc(k) + '"' + ((dr.skills || []).indexOf(k) >= 0 ? ' checked' : '') + '>' + esc(k) + '</label>'; }).join('') + '</div></div>' +
+      '<div class="col g8"><div class="row between"><span class="flabel" style="padding-bottom:0">Skills it trains</span><button type="button" class="btn plain" style="min-height:30px;font-size:15px" data-a="sheet" data-t="skills">Edit skills</button></div><div class="chips" style="padding:0 4px">' + c.skills.map(function (k) { return '<label class="chip"><input type="checkbox" name="skills" value="' + esc(k) + '"' + ((dr.skills || []).indexOf(k) >= 0 ? ' checked' : '') + '>' + esc(k) + '</label>'; }).join('') + '</div></div>' +
       '<div class="fgroup">' + field('How it works', '<textarea name="setup" maxlength="1500" rows="5" placeholder="Setup, rules and progressions">' + esc(dr.setup || '') + '</textarea>', true) + field('Coaching point', '<input type="text" name="cue" maxlength="200" value="' + esc(dr.cue || '') + '" placeholder="The one thing to watch for">', true) + field('Video or diagram link', '<input type="text" inputmode="url" name="link" maxlength="500" placeholder="https://" value="' + esc(dr.link || '') + '">', true) + '</div>' +
       '<button class="btn fill" type="submit">' + (sh.addto ? 'Save and add to session' : 'Save drill') + '</button></form>' +
       (sh.did ? '<button class="btn red" data-a="deleteDrill" data-did="' + esc(sh.did) + '">' + (sh.confirm ? 'Tap again to delete this drill' : 'Delete this drill') + '</button>' : '');
@@ -700,9 +735,22 @@ function sheetHTML(stats) {
         }).join('') + '</div></div>';
       }).join('') +
       '<button class="btn tint" data-a="sheet" data-t="drill" data-addto="' + esc(pt.id) + '">' + ic('plus', 18, 2.4) + 'Create a new drill</button><button class="btn fill" data-a="close">Done</button>';
+  } else if (sh.t === 'skills') {
+    title = 'Skills & positions';
+    var used = {}; drillsArr().forEach(function (d) { (d.skills || []).forEach(function (k) { used[k] = (used[k] || 0) + 1; }); });
+    body = '<p class="t2">Skills are what each player\u2019s rings track. Tag drills with them, and stats update when you log attendance.</p>' +
+      '<div class="col g8"><span class="flabel">Skills (' + c.skills.length + ')</span><div class="group">' + c.skills.map(function (k, i) {
+        return '<div class="cell"><span class="col grow g4"><span class="t1">' + esc(k) + '</span><span class="fn">' + plural(used[k] || 0, 'drill') + '</span></span><button class="ibtn" data-a="skMove" data-i="' + i + '" aria-label="Move ' + esc(k) + ' up"' + (i ? '' : ' disabled') + '>' + ic('up', 16, 2.4) + '</button><button class="ibtn" data-a="sheet" data-t="skillEdit" data-did="' + esc(k) + '" aria-label="Rename ' + esc(k) + '">' + ic('edit', 15, 2.2) + '</button><button class="ibtn" style="color:var(--red)" data-a="skDel" data-k="' + esc(k) + '" aria-label="Remove ' + esc(k) + '">' + ic('x', 15, 2.6) + '</button></div>';
+      }).join('') + '</div>' + (sh.confirmK ? '<div class="hint">Tap the cross again to remove ' + esc(sh.confirmK) + '. Drills keep their tags, but players stop seeing it.</div>' : '') + '</div>' +
+      '<form data-form="addSkill" class="form" style="gap:10px"><div class="fgroup">' + field('New skill', '<input type="text" name="name" required maxlength="30" placeholder="For example, Pressing" autocomplete="off">') + '</div><button class="btn tint" type="submit">Add skill</button></form>' +
+      '<div class="col g8"><span class="flabel">Positions</span><div class="chips" style="padding:0 4px">' + c.positions.map(function (x) { return '<span class="chip">' + esc(x) + '<button class="xbtn" data-a="posDel" data-k="' + esc(x) + '" aria-label="Remove ' + esc(x) + '">' + ic('x', 13, 2.8) + '</button></span>'; }).join('') + '</div></div>' +
+      '<form data-form="addPos" class="form" style="gap:10px"><div class="fgroup">' + field('New position', '<input type="text" name="name" required maxlength="30" placeholder="For example, Universal" autocomplete="off">') + '</div><button class="btn tint" type="submit">Add position</button></form>';
+  } else if (sh.t === 'skillEdit') {
+    var oldK = sh.did; if (c.skills.indexOf(oldK) < 0) return ''; title = 'Rename skill';
+    body = '<form data-form="renameSkill" data-old="' + esc(oldK) + '" class="form"><div class="fgroup">' + field('Name', '<input type="text" name="name" required maxlength="30" value="' + esc(oldK) + '">') + '</div><button class="btn fill" type="submit">Save</button></form><p class="note">Every drill tagged ' + esc(oldK) + ' is updated too, so players keep their history.</p><button class="btn" data-a="sheet" data-t="skills">Back</button>';
   } else if (sh.t === 'settings') {
     title = 'Settings';
-    body = '<form data-form="settings" class="form"><div class="col g8"><span class="flabel">Skill tracking</span><div class="fgroup">' + field('Due after', '<input type="number" name="fresh" min="1" max="60" value="' + c.fresh + '" inputmode="numeric"><span class="l2">days</span>') + field('Overdue after', '<input type="number" name="overdue" min="2" max="90" value="' + c.overdue + '" inputmode="numeric"><span class="l2">days</span>') + field('Skills tracked', '<textarea name="skills" rows="2">' + esc(c.skills.join(', ')) + '</textarea>', true) + '</div><span class="note">Separate skills with commas. Renaming a skill starts its history again.</span></div>' +
+    body = '<form data-form="settings" class="form"><div class="col g8"><span class="flabel">Skill tracking</span><div class="fgroup">' + field('Due after', '<input type="number" name="fresh" min="1" max="60" value="' + c.fresh + '" inputmode="numeric"><span class="l2">days</span>') + field('Overdue after', '<input type="number" name="overdue" min="2" max="90" value="' + c.overdue + '" inputmode="numeric"><span class="l2">days</span>') + '</div><button type="button" class="btn tint" style="margin-top:6px" data-a="sheet" data-t="skills">Edit skills and positions</button></div>' +
       '<div class="col g8"><span class="flabel">Season</span><div class="fgroup">' + field('Session length', '<input type="number" name="sessionMins" min="30" max="180" step="5" value="' + c.sessionMins + '" inputmode="numeric"><span class="l2">min</span>') + field('Season ends', '<input type="date" name="seasonEnd" value="' + esc(c.seasonEnd) + '">') + '</div></div>' +
       '<div class="fgroup"><label class="field"><span class="grow" style="width:auto">Open squad link</span><input class="switch" type="checkbox" name="openAccess"' + (c.openAccess ? ' checked' : '') + '></label></div><span class="note" style="margin-top:-14px">On: players only need the website address. Off: they need the private team link.</span>' +
       '<button class="btn fill" type="submit">Save settings</button></form>';
@@ -854,6 +902,14 @@ document.addEventListener('click', function (e) {
   else if (a === 'removeBlock' && t) { var c2 = planFor(t, stats).ids.slice(); c2.splice(+el.dataset.i, 1); S.work[t.id] = c2; S.open = -1; render(true); }
   else if (a === 'savePlan' && t) { var ids2 = planFor(t, stats).ids.slice(); run(function () { return sb.from('sessions').update({ plan: ids2, custom: false }).eq('id', t.id).then(must); }, 'Plan saved').then(function (ok) { if (ok) { delete S.work[t.id]; render(true); } }); }
   else if (a === 'resetPlan' && t) { run(function () { return sb.from('sessions').update({ plan: [], custom: false }).eq('id', t.id).then(must); }, 'New plan suggested'); }
+  else if (a === 'skDel') {
+    var dk = el.dataset.k;
+    if (S.sheet.confirmK !== dk) { S.sheet.confirmK = dk; render(true); return; }
+    var rest = cfg().skills.filter(function (x) { return x !== dk; }); if (!rest.length) { toast('Keep at least one skill.'); return; }
+    saveCfg({ skills: rest }, dk + ' removed', { t: 'skills' });
+  }
+  else if (a === 'skMove') { var sm = cfg().skills.slice(); var si = +el.dataset.i; if (si > 0) { var tmp = sm[si - 1]; sm[si - 1] = sm[si]; sm[si] = tmp; saveCfg({ skills: sm }, null, { t: 'skills' }); } }
+  else if (a === 'posDel') { var pd = el.dataset.k; saveCfg({ positions: cfg().positions.filter(function (x) { return x !== pd; }) }, pd + ' removed', { t: 'skills' }); }
   else if (a === 'delInvite') { var de = el.dataset.email; run(function () { return sb.from('coach_invites').delete().eq('email', de).then(must); }, 'Invite cancelled'); }
   else if (a === 'deletePlayer') {
     if (!S.sheet.confirm) { S.sheet.confirm = true; render(true); return; }
@@ -966,13 +1022,33 @@ document.addEventListener('submit', function (e) {
       closeSheet();
     });
   }
+  else if (t === 'addSkill' || t === 'addPos') {
+    var nmk = g('name').replace(/\s+/g, ' '); if (!nmk) return;
+    var listK = t === 'addSkill' ? cfg().skills.slice() : cfg().positions.slice();
+    if (listK.some(function (x) { return x.toLowerCase() === nmk.toLowerCase(); })) { toast(nmk + ' is already on the list.'); return; }
+    if (t === 'addSkill' && listK.length >= 16) { toast('That\u2019s the maximum of 16 skills.'); return; }
+    listK.push(nmk); saveCfg(t === 'addSkill' ? { skills: listK } : { positions: listK }, nmk + ' added', { t: 'skills' });
+  }
+  else if (t === 'renameSkill') {
+    var oldN = f.dataset.old; var newN = g('name').replace(/\s+/g, ' ');
+    if (!newN || newN === oldN) { S.sheet = { t: 'skills' }; render(true); return; }
+    if (cfg().skills.some(function (x) { return x !== oldN && x.toLowerCase() === newN.toLowerCase(); })) { toast(newN + ' is already a skill.'); return; }
+    var newSkills = cfg().skills.map(function (x) { return x === oldN ? newN : x; });
+    var tagged = drillsArr().filter(function (d) { return (d.skills || []).indexOf(oldN) >= 0; });
+    run(async function () {
+      must(await sb.from('settings').update({ skills: newSkills }).eq('id', 1));
+      for (var i = 0; i < tagged.length; i++) must(await sb.from('drills').update({ skills: tagged[i].skills.map(function (x) { return x === oldN ? newN : x; }) }).eq('id', tagged[i].id));
+    }, 'Renamed to ' + newN).then(function (ok) { if (ok) { S.sheet = { t: 'skills' }; render(true); } });
+  }
   else if (t === 'settings') {
     var fr = Math.max(1, +g('fresh') || 7); var ov = Math.max(fr + 1, +g('overdue') || 14);
-    var skills = g('skills').split(',').map(function (x) { return x.trim(); }).filter(Boolean).slice(0, 12);
-    var upd = { fresh: fr, overdue: ov, session_mins: +g('sessionMins') || 90, skills: skills.length ? skills : DEFAULT_SKILLS }; if (g('seasonEnd')) upd.season_end = g('seasonEnd'); upd.open_access = fd.get('openAccess') != null;
+    var upd = { fresh: fr, overdue: ov, session_mins: +g('sessionMins') || 90 }; if (g('seasonEnd')) upd.season_end = g('seasonEnd'); upd.open_access = fd.get('openAccess') != null;
     run(function () { return sb.from('settings').update(upd).eq('id', 1).then(must); }, 'Settings saved').then(function (ok) { if (ok) closeSheet(); });
   }
 });
+function saveCfg(upd, msg, sheet) {
+  return run(function () { return sb.from('settings').update(upd).eq('id', 1).then(must); }, msg).then(function (ok) { if (ok) { S.sheet = sheet || null; render(true); } return ok; });
+}
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && S.sheet) closeSheet(); });
 
 /* ---------- boot ---------- */
